@@ -1,22 +1,20 @@
-import os
-import tempfile
-import streamlit as st
-import PyPDF2
-from PyPDF2.errors import PdfReadError
-import requests
-from PIL import Image
-import io
 import base64
+import io
 import json
+import os  # Added for os.unlink
+import tempfile
+
+import PyPDF2
+import google.generativeai as genai
+import requests
+import streamlit as st
+from PIL import Image
+from PyPDF2.errors import PdfReadError
+from langchain.chains import RetrievalQA
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings, OllamaEmbeddings
 from langchain_community.llms import Ollama
-import google.generativeai as genai
-from google import genai as genai_client
-import os # Added for os.unlink
 from langchain_community.vectorstores import FAISS
-from langchain.chains import RetrievalQA
 
 # Set page configuration
 st.set_page_config(page_title="RAG App", layout="wide")
