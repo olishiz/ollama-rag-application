@@ -10,6 +10,7 @@ import requests
 import streamlit as st
 from PIL import Image
 from PyPDF2.errors import PdfReadError
+from pptx import Presentation
 from langchain.chains import RetrievalQA
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings, OllamaEmbeddings
@@ -22,7 +23,7 @@ st.set_page_config(page_title="RAG App", layout="wide")
 # App title and description
 st.title("📚 Document & Image Query Engine")
 st.markdown("""
-Upload a PDF document or an image and ask questions about its content.
+Upload a document (PDF, PPT, PPTX) or an image and ask questions about its content.
 This app uses Retrieval-Augmented Generation (RAG) to provide accurate answers.
 """)
 
@@ -46,8 +47,8 @@ if 'agent_mode' not in st.session_state:
     st.session_state.agent_mode = 'local' # Default to local
 if 'online_ollama_url' not in st.session_state:
     st.session_state.online_ollama_url = "http://localhost:11434"
-if 'uploaded_pdf_file' not in st.session_state:
-    st.session_state.uploaded_pdf_file = None
+if 'uploaded_doc_file' not in st.session_state:
+    st.session_state.uploaded_doc_file = None
 
 # Function to extract text from PDF
 def extract_text_from_pdf(pdf_file):
@@ -85,11 +86,41 @@ def extract_text_from_pdf(pdf_file):
         st.error(f"An unexpected error occurred while processing the PDF: {e}")
         return None
 
+# Function to extract text from PPT
+def extract_text_from_ppt(ppt_file):
+    try:
+        presentation = Presentation(ppt_file)
+        text = ""
+
+        for slide_num, slide in enumerate(presentation.slides):
+            try:
+                slide_text = ""
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        slide_text += shape.text + " "
+
+                if slide_text:
+                    text += f"Slide {slide_num + 1}: {slide_text}\n"
+                else:
+                    # This can happen for slides with no text content
+                    st.warning(f"Slide {slide_num + 1} contained no extractable text. It might be an image-based slide.")
+            except Exception as e:
+                st.error(f"Error extracting text from slide {slide_num + 1}: {e}")
+                # Continue to next slide
+
+        if not text.strip():
+            st.warning("No text could be extracted from the PPT. The presentation might be empty or consist entirely of images.")
+            return None
+        return text
+    except Exception as e:
+        st.error(f"An unexpected error occurred while processing the PPT: {e}")
+        return None
+
 # Function to process the document
 def process_document(text):
     # Check if text is None or empty
     if text is None or not text.strip():
-        st.error("Cannot process document: No extractable text found in the PDF.")
+        st.error("Cannot process document: No extractable text found in the document.")
         return None, None, None
 
     # Split text into chunks
@@ -132,7 +163,6 @@ def process_document(text):
         return None, None, None
 
     vectorstore = FAISS.from_texts(chunks, embeddings)
-
 
     # Create retriever
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
@@ -200,7 +230,7 @@ with st.sidebar:
     st.header("Upload Content")
 
     # Input type selection
-    input_type = st.radio("Select input type:", ["PDF Document", "Image", "Chatbot"])
+    input_type = st.radio("Select input type:", ["Document", "Image", "Chatbot"])
     st.session_state.input_type = input_type
 
     st.markdown("--- Agent Configuration ---")
@@ -239,26 +269,38 @@ with st.sidebar:
                 st.error(f"Invalid Google API Key or configuration error: {e}")
 
 
-    if input_type == "PDF Document":
-        uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
+    if input_type == "Document":
+        uploaded_file = st.file_uploader("Choose a document file", type=["pdf", "ppt", "pptx"])
 
         if uploaded_file is not None:
+            file_extension = uploaded_file.name.split('.')[-1].lower()
             with st.spinner("Processing document..."):
-                # Save the uploaded file to a temporary file
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                # Save the uploaded file to a temporary file with appropriate extension
+                suffix = f'.{file_extension}'
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
                     tmp_file.write(uploaded_file.getvalue())
                     tmp_file_path = tmp_file.name
 
                 # Handle differently based on agent mode
                 if st.session_state.agent_mode == 'google':
                     try:
-                        # Upload the PDF file to Google's API
-                        client = genai_client.Client(api_key=st.session_state.google_api_key)
-                        uploaded_pdf = client.files.upload(file=tmp_file_path)
-                        st.session_state.uploaded_pdf_file = uploaded_pdf
+                        # Upload the document file to Google's API
+                        client = genai.configure(api_key=st.session_state.google_api_key)
+
+
+
+
+                        uploaded_doc = client.files.upload(file=tmp_file_path)
+                        st.session_state.uploaded_doc_file = uploaded_doc
 
                         # Still extract text for RAG fallback if needed
-                        text = extract_text_from_pdf(tmp_file_path)
+                        if file_extension.lower() in ['pdf']:
+                            text = extract_text_from_pdf(tmp_file_path)
+                        elif file_extension.lower() in ['ppt', 'pptx']:
+                            text = extract_text_from_ppt(tmp_file_path)
+                        else:
+                            st.error(f"Unsupported file format: {file_extension}")
+                            text = None
                         st.session_state.processed_text = text
 
                         # Process document for RAG fallback only if text was successfully extracted
@@ -268,17 +310,23 @@ with st.sidebar:
                             st.session_state.retriever = retriever
                             st.session_state.qa_chain = qa_chain
                         else:
-                            # Even if text extraction fails, we can still use the uploaded PDF file directly with Google API
-                            st.warning("No extractable text found in the PDF, but the file was uploaded to Google API successfully. Using image-based PDF processing.")
+                            # Even if text extraction fails, we can still use the uploaded document file directly with Google API
+                            st.warning("No extractable text found in the document, but the file was uploaded to Google API successfully. Using image-based document processing.")
                             st.session_state.vectorstore = None
                             st.session_state.retriever = None
                             st.session_state.qa_chain = None
 
                         st.success("Document uploaded to Google API and processed successfully!")
                     except Exception as e:
-                        st.error(f"Error uploading PDF to Google API: {e}")
+                        st.error(f"Error uploading document to Google API: {e}")
                         # Fall back to text extraction
-                        text = extract_text_from_pdf(tmp_file_path)
+                        if file_extension.lower() in ['pdf']:
+                            text = extract_text_from_pdf(tmp_file_path)
+                        elif file_extension.lower() in ['ppt', 'pptx']:
+                            text = extract_text_from_ppt(tmp_file_path)
+                        else:
+                            st.error(f"Unsupported file format: {file_extension}")
+                            text = None
                         st.session_state.processed_text = text
 
                         # Process document only if text was successfully extracted
@@ -288,15 +336,21 @@ with st.sidebar:
                             st.session_state.retriever = retriever
                             st.session_state.qa_chain = qa_chain
                         else:
-                            st.error("Cannot process document: No extractable text found in the PDF.")
+                            st.error("Cannot process document: No extractable text found in the document.")
                             st.session_state.vectorstore = None
                             st.session_state.retriever = None
                             st.session_state.qa_chain = None
 
                         st.warning("Falling back to text extraction due to upload error.")
                 else:
-                    # Extract text from PDF for local/online modes
-                    text = extract_text_from_pdf(tmp_file_path)
+                    # Extract text from document for local/online modes
+                    if file_extension.lower() in ['pdf']:
+                        text = extract_text_from_pdf(tmp_file_path)
+                    elif file_extension.lower() in ['ppt', 'pptx']:
+                        text = extract_text_from_ppt(tmp_file_path)
+                    else:
+                        st.error(f"Unsupported file format: {file_extension}")
+                        text = None
                     st.session_state.processed_text = text
 
                     # Process document only if text was successfully extracted
@@ -307,7 +361,7 @@ with st.sidebar:
                         st.session_state.qa_chain = qa_chain
                         st.success("Document processed successfully!")
                     else:
-                        st.error("Cannot process document: No extractable text found in the PDF.")
+                        st.error("Cannot process document: No extractable text found in the document.")
                         st.session_state.vectorstore = None
                         st.session_state.retriever = None
                         st.session_state.qa_chain = None
@@ -363,7 +417,7 @@ with st.sidebar:
 
     This is a RAG (Retrieval Augmented Generation) application that allows you to:
 
-    1. Upload and process PDF documents for question answering
+    1. Upload and process documents (PDF, PPT, PPTX) for question answering
     2. Upload images (from file or URL) for visual analysis
     3. Chat directly with the AI using the Chatbot feature
 
@@ -377,7 +431,7 @@ with st.sidebar:
 
 
 # Display and query content based on input type
-if st.session_state.qa_chain is not None or (st.session_state.agent_mode == 'google' and st.session_state.uploaded_pdf_file is not None):  # PDF document processing
+if st.session_state.qa_chain is not None or (st.session_state.agent_mode == 'google' and st.session_state.uploaded_doc_file is not None):  # Document processing
     st.header("Ask Questions About Your Document")
     with st.form(key='document_query_form'):
         query = st.text_input("Enter your question:")
@@ -390,20 +444,20 @@ if st.session_state.qa_chain is not None or (st.session_state.agent_mode == 'goo
                 if st.session_state.agent_mode == 'google':
                     if not st.session_state.google_api_key:
                         st.error("Google API Key is not configured.")
-                    elif st.session_state.uploaded_pdf_file is not None:
-                        # Use the uploaded PDF file with the new Google API
+                    elif st.session_state.uploaded_doc_file is not None:
+                        # Use the uploaded document file with the new Google API
                         try:
-                            client = genai_client.Client(api_key=st.session_state.google_api_key)
-                            prompt = f"Answer this question based on the PDF document: {query}"
+                            client = genai.configure(api_key=st.session_state.google_api_key)
+                            prompt = f"Answer this question based on the document: {query}"
                             response = client.models.generate_content(
                                 model="gemini-2.0-flash",
-                                contents=[prompt, st.session_state.uploaded_pdf_file]
+                                contents=[prompt, st.session_state.uploaded_doc_file]
                             )
                             answer = response.text
                             # No source docs when using direct file upload
                             source_docs = []
                         except Exception as e:
-                            st.error(f"Error querying Google Gemini with PDF file: {e}")
+                            st.error(f"Error querying Google Gemini with document file: {e}")
                             answer = f"Error: {e}"
                             # Fall back to RAG if available
                             if st.session_state.retriever:
@@ -444,7 +498,7 @@ if st.session_state.qa_chain is not None or (st.session_state.agent_mode == 'goo
 
                 # Display answer
                 st.markdown("### Answer")
-                st.text_area("Answer", answer, height=200, disabled=True)
+                st.text_area("Answer", answer, height=200)
 
                 # Display source documents
                 with st.expander("Source Documents"):
@@ -689,4 +743,4 @@ elif st.session_state.input_type == "Chatbot":
                 st.markdown(f"<div class='ai-message'><strong>AI:</strong> {message['content']}</div>", unsafe_allow_html=True)
 
 else:
-    st.info("Please upload a PDF document or an image to get started, or select Chatbot to chat with AI.")
+    st.info("Please upload a document (PDF, PPT, PPTX) or an image to get started, or select Chatbot to chat with AI.")
