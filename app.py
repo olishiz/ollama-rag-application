@@ -195,80 +195,6 @@ def load_image_from_url(url):
         st.error(f"Error loading image from URL: {e}")
         return None
 
-# SpongeBob and Patrick image modal popup
-def show_spongebob_patrick():
-    # Use the SpongeBob and Patrick images
-    spongebob_url = "https://upload.wikimedia.org/wikipedia/commons/7/7a/SpongeBob_SquarePants_character.png"
-    patrick_url = "https://ih1.redbubble.net/image.4032169436.4488/bg,f8f8f8-flat,750x,075,f-pad,750x1000,f8f8f8.jpg"
-
-    try:
-        # Create a placeholder for the modal
-        modal_placeholder = st.empty()
-
-        with modal_placeholder.container():
-            st.markdown("""
-            <style>
-            .modal-overlay {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background-color: rgba(0, 0, 0, 0.5);
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                z-index: 1000;
-            }
-            .modal-content {
-                background-color: #f0f2f6;
-                border-radius: 10px;
-                padding: 20px;
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-                max-width: 80%;
-                max-height: 80%;
-                overflow: auto;
-                position: relative;
-            }
-            .close-button {
-                position: absolute;
-                top: 10px;
-                right: 10px;
-                background: none;
-                border: none;
-                font-size: 24px;
-                cursor: pointer;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-
-            st.markdown("<div class='modal-overlay'><div class='modal-content'>", unsafe_allow_html=True)
-
-            # Add a close button at the top right
-            if st.button("✖️", key="close_modal", help="Close", type="secondary"):
-                st.session_state.show_spongebob = False
-                st.experimental_rerun()
-
-            st.markdown("## SpongeBob & Patrick Modal")
-
-            # Create two columns for the images
-            col1, col2 = st.columns(2)
-
-            # Display SpongeBob in the first column
-            with col1:
-                st.markdown("### SpongeBob SquarePants!")
-                st.image(spongebob_url, width=250)
-
-            # Display Patrick in the second column
-            with col2:
-                st.markdown("### Patrick Star!")
-                st.image(patrick_url, width=250)
-
-            st.markdown("</div></div>", unsafe_allow_html=True)
-
-    except Exception as e:
-        st.error(f"Error displaying SpongeBob & Patrick modal: {e}")
-
 # Sidebar for document/image upload
 with st.sidebar:
     st.header("Upload Content")
@@ -291,7 +217,7 @@ with st.sidebar:
 
     if selected_agent_mode != st.session_state.agent_mode:
         st.session_state.agent_mode = selected_agent_mode
-        st.experimental_rerun() # Rerun if the selection changes
+        st.rerun() # Rerun if the selection changes
 
     st.write(f"Current Agent Mode: **{st.session_state.agent_mode.capitalize()}**")
 
@@ -686,7 +612,7 @@ elif st.session_state.input_type == "Chatbot":
             st.session_state.chat_history = [
                 {'role': 'assistant', 'content': 'Hello! I\'m your AI assistant. How can I help you today?'}
             ]
-            st.experimental_rerun()
+            st.rerun()
 
     # Create a container for chat messages with scrolling
     chat_container = st.container()
@@ -733,7 +659,7 @@ elif st.session_state.input_type == "Chatbot":
                 st.session_state.chat_history.append({'role': 'assistant', 'content': response_content})
 
             # Rerun to update the chat display
-            st.experimental_rerun()
+            st.rerun()
 
     # Display chat history in the container with custom styling
     with chat_container:
